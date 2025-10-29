@@ -10,8 +10,7 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [project.scripts]
-# Expose the Typer app via contorsion.cli:app (module:callable)
-contorsion = "contorsion.cli:app"
+contorsion = "contorsion.drive_torsions:cli"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]

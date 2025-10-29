@@ -11,7 +11,10 @@ Lots of code stolen from Josh Horton's examples, for example [here](https://gist
 Install [pixi](https://pixi.sh/latest/), then run
 
 ```bash
+git clone https://github.com/fjclark/contorsion.git
+cd contorsion
 pixi install
+pixi shell
 ```
 
 ## Features
@@ -19,7 +22,6 @@ pixi install
 - Run reference QM torsiondrives for all rotatable bonds in a molecule
 - Benchmark force fields against reference data
 - Generate energy and RMSD plots
-- Modular, type-hinted API with clean separation of concerns
 
 ## CLI Usage
 
