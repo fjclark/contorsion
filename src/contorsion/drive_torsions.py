@@ -126,7 +126,7 @@ def build_torsiondrive_input(
     if optimization_keywords is None:
         optimization_keywords = {
             "coordsys": "dlc",
-            "maxiter": 600,
+            "maxiter": 300,
             "enforce": 0.1,
             "reset": True,
             "qccnv": True,
@@ -154,8 +154,8 @@ def build_torsiondrive_input(
 
 def run_single_torsiondrive(
     td_input: TorsionDriveInput,
-    ncores: int = 1,
-    memory: float = 4.0,
+    ncores: int = 30,
+    memory: float = 20.0,
 ) -> TorsionDriveResult:
     """
     Execute a single torsiondrive calculation.
@@ -164,9 +164,9 @@ def run_single_torsiondrive(
     ----------
     td_input : TorsionDriveInput
         Input specification for the torsiondrive
-    ncores : int, default=1
+    ncores : int, default=30
         Number of CPU cores to use
-    memory : float, default=4.0
+    memory : float, default=20.0
         Memory in GB
 
     Returns
@@ -193,8 +193,8 @@ def run_constrained_optimization(
     dihedral: Tuple[int, int, int, int],
     model: Model,
     optimization_keywords: Dict[str, Any],
-    ncores: int = 1,
-    memory: float = 1.0,
+    ncores: int = 30,
+    memory: float = 20.0,
 ) -> Tuple[QCMolecule, float, bool]:
     """
     Run a constrained geometry optimization with frozen dihedral.
@@ -209,9 +209,9 @@ def run_constrained_optimization(
         Force field or QM method
     optimization_keywords : Dict[str, Any]
         Geometric optimization settings
-    ncores : int, default=1
+    ncores : int, default=30
         Number of cores
-    memory : float, default=1.0
+    memory : float, default=20.0
         Memory in GB
 
     Returns
@@ -384,7 +384,7 @@ def plot_energy_profile(
     ax.set_xlabel("Dihedral Angle (°)", fontsize=12)
     ax.set_ylabel("Relative Energy (kJ/mol)", fontsize=12)
     ax.legend(fontsize=10)
-    ax.grid(True, alpha=0.3)
+    ax.grid(True)
     plt.tight_layout()
     return fig
 
@@ -419,7 +419,7 @@ def plot_rmsd_profile(
     ax.set_xlabel("Dihedral Angle (°)", fontsize=12)
     ax.set_ylabel("RMSD (Å)", fontsize=12)
     ax.legend(fontsize=10)
-    ax.grid(True, alpha=0.3)
+    ax.grid(True)
     plt.tight_layout()
     return fig
 
@@ -428,6 +428,7 @@ def draw_molecule_with_bonds(
     molecule: Molecule,
     dihedrals: List[Tuple[int, int, int, int]],
     output_path: Path,
+    highlight_specific: Optional[int] = None,
 ) -> None:
     """
     Draw 2D molecule structure with rotatable bonds highlighted.
@@ -440,19 +441,27 @@ def draw_molecule_with_bonds(
         List of dihedral atom indices to highlight
     output_path : Path
         Path to save the image
+    highlight_specific : Optional[int], default=None
+        If provided, only highlight the dihedral at this index.
+        Otherwise highlight all dihedrals.
     """
     rdkit_mol = molecule.to_rdkit()
     Draw.rdDepictor.Compute2DCoords(rdkit_mol)
 
-    # Flatten dihedrals to get all highlighted atoms
-    highlight_atoms = list(set(atom for dihedral in dihedrals for atom in dihedral))
+    # Determine which atoms to highlight
+    if highlight_specific is not None and 0 <= highlight_specific < len(dihedrals):
+        # Highlight only the specific dihedral
+        highlight_atoms = list(dihedrals[highlight_specific])
+    else:
+        # Flatten all dihedrals to get all highlighted atoms
+        highlight_atoms = list(set(atom for dihedral in dihedrals for atom in dihedral))
 
-    Draw.MolToFile(
-        rdkit_mol,
-        str(output_path),
-        highlightAtoms=highlight_atoms,
-        size=(800, 800),
-    )
+    # Create drawing options to include atom indices
+    drawer = Draw.MolDraw2DCairo(800, 800)
+    drawer.drawOptions().addAtomIndices = True
+    drawer.DrawMolecule(rdkit_mol, highlightAtoms=highlight_atoms)
+    drawer.FinishDrawing()
+    drawer.WriteDrawingText(str(output_path))
 
 
 # ============================================================================
@@ -467,8 +476,9 @@ def run_reference_torsiondrives(
     program: str = "openmm",
     grid_spacing: int = 15,
     n_conformers: int = 1,
-    ncores: int = 1,
-    memory: float = 4.0,
+    ncores: int = 30,
+    memory: float = 20.0,
+    bond_indices: Optional[List[int]] = None,
 ) -> Dict[int, TorsionDriveResult]:
     """
     Run reference torsiondrives for all rotatable bonds in a molecule.
@@ -487,10 +497,13 @@ def run_reference_torsiondrives(
         Grid spacing in degrees
     n_conformers : int, default=1
         Number of conformers to generate
-    ncores : int, default=1
+    ncores : int, default=30
         Number of CPU cores
-    memory : float, default=4.0
+    memory : float, default=20.0
         Memory in GB
+    bond_indices : Optional[List[int]], default=None
+        Specific bond indices to scan. If None, scan all rotatable bonds.
+        Indices correspond to the order of rotatable bonds found.
 
     Returns
     -------
@@ -505,35 +518,49 @@ def run_reference_torsiondrives(
     molecule.generate_conformers(n_conformers=n_conformers)
 
     # Find rotatable bonds
-    dihedrals = find_rotatable_bonds_with_dihedrals(molecule)
-    console.print(f"[green]Found {len(dihedrals)} rotatable bonds[/green]")
+    all_dihedrals = find_rotatable_bonds_with_dihedrals(molecule)
+    console.print(f"[green]Found {len(all_dihedrals)} rotatable bonds[/green]")
 
-    if not dihedrals:
+    if not all_dihedrals:
         console.print("[yellow]Warning: No rotatable bonds found[/yellow]")
         return {}
+
+    # Filter bonds if specific indices requested
+    if bond_indices is not None:
+        dihedrals = [
+            all_dihedrals[i] for i in bond_indices if 0 <= i < len(all_dihedrals)
+        ]
+        console.print(
+            f"[cyan]Scanning {len(dihedrals)} specific bond(s): {bond_indices}[/cyan]"
+        )
+        indices_to_scan = bond_indices
+    else:
+        dihedrals = all_dihedrals
+        indices_to_scan = list(range(len(dihedrals)))
 
     # Save molecule info
     mol_data = {
         "smiles": smiles,
-        "n_rotatable_bonds": len(dihedrals),
-        "dihedrals": dihedrals,
+        "n_rotatable_bonds": len(all_dihedrals),
+        "dihedrals": all_dihedrals,
+        "scanned_indices": indices_to_scan,
     }
     with open(output_dir / "molecule_info.json", "w") as f:
         json.dump(mol_data, f, indent=2)
 
-    # Draw molecule
+    # Draw molecule with all bonds
     draw_molecule_with_bonds(
         molecule,
-        dihedrals,
+        all_dihedrals,
         output_dir / "molecule.png",
     )
 
     # Run torsiondrives
     results = {}
-    for i, dihedral in enumerate(dihedrals):
+    for idx, (bond_idx, dihedral) in enumerate(zip(indices_to_scan, dihedrals)):
         console.print(
-            f"[cyan]Running torsiondrive for bond {i + 1}/{len(dihedrals)}: "
-            f"{dihedral}[/cyan]"
+            f"[cyan]Running torsiondrive for bond {idx + 1}/{len(dihedrals)} "
+            f"(index {bond_idx}): {dihedral}[/cyan]"
         )
 
         td_input = build_torsiondrive_input(
@@ -547,12 +574,12 @@ def run_reference_torsiondrives(
         result = run_single_torsiondrive(td_input, ncores=ncores, memory=memory)
 
         # Save result
-        result_file = output_dir / f"bond_{i}_reference.json"
+        result_file = output_dir / f"bond_{bond_idx}_reference.json"
         with open(result_file, "w") as f:
             f.write(result.json())
 
-        results[i] = result
-        console.print(f"[green]✓ Bond {i + 1} complete[/green]")
+        results[bond_idx] = result
+        console.print(f"[green]✓ Bond {bond_idx} complete[/green]")
 
     return results
 
@@ -562,8 +589,9 @@ def run_benchmark_torsiondrives(
     model: Model,
     output_dir: Path,
     program: str = "rdkit",
-    ncores: int = 1,
-    memory: float = 1.0,
+    ncores: int = 30,
+    memory: float = 20.0,
+    bond_indices: Optional[List[int]] = None,
 ) -> Dict[int, TorsionDriveResult]:
     """
     Run benchmark torsiondrives using reference geometries.
@@ -578,10 +606,13 @@ def run_benchmark_torsiondrives(
         Directory to save benchmark results
     program : str, default="rdkit"
         QCEngine program name
-    ncores : int, default=1
+    ncores : int, default=30
         Number of CPU cores
-    memory : float, default=1.0
+    memory : float, default=20.0
         Memory in GB
+    bond_indices : Optional[List[int]], default=None
+        Specific bond indices to benchmark. If None, automatically detect
+        which bonds are present in the reference directory.
 
     Returns
     -------
@@ -595,12 +626,23 @@ def run_benchmark_torsiondrives(
         mol_info = json.load(f)
 
     dihedrals = [tuple(d) for d in mol_info["dihedrals"]]
+
+    # Auto-detect which bonds have reference data if not specified
+    if bond_indices is None:
+        bond_indices = []
+        for i in range(len(dihedrals)):
+            if (reference_dir / f"bond_{i}_reference.json").exists():
+                bond_indices.append(i)
+        console.print(
+            f"[cyan]Auto-detected {len(bond_indices)} bonds with reference data: {bond_indices}[/cyan]"
+        )
+
     console.print(
-        f"[bold blue]Running benchmark for {len(dihedrals)} bonds[/bold blue]"
+        f"[bold blue]Running benchmark for {len(bond_indices)} bond(s)[/bold blue]"
     )
 
     results = {}
-    for i in range(len(dihedrals)):
+    for i in bond_indices:
         reference_file = reference_dir / f"bond_{i}_reference.json"
         if not reference_file.exists():
             console.print(
@@ -608,7 +650,7 @@ def run_benchmark_torsiondrives(
             )
             continue
 
-        console.print(f"[cyan]Processing bond {i + 1}/{len(dihedrals)}[/cyan]")
+        console.print(f"[cyan]Processing bond {i}[/cyan]")
 
         # Load reference
         reference = TorsionDriveResult.parse_file(str(reference_file))
@@ -635,19 +677,6 @@ def run_benchmark_torsiondrives(
             success=True,
         )
 
-        #     target_result = TorsionDriveResult(
-        #     keywords=qm_input_scan.keywords,
-        #     extras=qm_input_scan.extras,
-        #     input_specification=qc_spec,
-        #     initial_molecule=list(qm_inputs.values()),
-        #     optimization_spec=qm_input_scan.optimization_spec,
-        #     final_energies={},
-        #     final_molecules={},
-        #     optimization_history={},
-        #     provenance={"creator": "geometric_custom", "routine": "custom", "version": 1},
-        #     success=True,
-        # )
-
         # Get optimization keywords
         opt_keywords = reference.optimization_history["0"][0].keywords.copy()
         opt_keywords["maxiter"] = 100
@@ -657,18 +686,8 @@ def run_benchmark_torsiondrives(
         failed_count = 0
         for angle_key, ref_molecule in track(
             reference.final_molecules.items(),
-            description=f"Bond {i + 1}",
+            description=f"Bond {i}",
         ):
-            final_mol, energy, success = run_constrained_optimization(
-                ref_molecule,
-                dihedral,
-                model,
-                opt_keywords,
-                ncores=ncores,
-                memory=memory,
-            )
-            benchmark_result.final_molecules[angle_key] = final_mol
-            benchmark_result.final_energies[angle_key] = energy
             try:
                 final_mol, energy, success = run_constrained_optimization(
                     ref_molecule,
@@ -699,17 +718,17 @@ def run_benchmark_torsiondrives(
             f.write(benchmark_result.json())
 
         results[i] = benchmark_result
-        console.print(f"[green]✓ Bond {i + 1} complete[/green]")
+        console.print(f"[green]✓ Bond {i} complete[/green]")
 
     return results
 
 
 def create_analysis_plots(
     reference_dir: Path,
-    benchmark_dir: Path,
+    benchmark_dirs: List[Path],
     output_dir: Path,
     reference_label: str = "Reference",
-    benchmark_label: str = "Benchmark",
+    benchmark_labels: Optional[List[str]] = None,
 ) -> None:
     """
     Create analysis plots comparing reference and benchmark scans.
@@ -718,14 +737,14 @@ def create_analysis_plots(
     ----------
     reference_dir : Path
         Directory with reference results
-    benchmark_dir : Path
-        Directory with benchmark results
+    benchmark_dirs : List[Path]
+        List of directories with benchmark results to compare
     output_dir : Path
         Directory to save plots
     reference_label : str, default="Reference"
         Label for reference data
-    benchmark_label : str, default="Benchmark"
-        Label for benchmark data
+    benchmark_labels : Optional[List[str]], default=None
+        Labels for benchmark data. If None, uses directory names.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -734,67 +753,136 @@ def create_analysis_plots(
         mol_info = json.load(f)
 
     n_bonds = mol_info["n_rotatable_bonds"]
-    console.print(f"[bold blue]Creating plots for {n_bonds} bonds[/bold blue]")
+    all_dihedrals = [tuple(d) for d in mol_info["dihedrals"]]
+    smiles = mol_info["smiles"]
 
-    # Summary data
-    summary = []
+    # Set default labels if not provided
+    if benchmark_labels is None:
+        benchmark_labels = [d.name for d in benchmark_dirs]
+
+    console.print(
+        f"[bold blue]Creating plots, comparing {len(benchmark_dirs)} benchmark(s)[/bold blue]"
+    )
+
+    # Load molecule for bond-specific highlighting
+    molecule = Molecule.from_smiles(smiles)
+
+    # Summary data for each benchmark
+    summaries = {label: [] for label in benchmark_labels}
 
     for i in range(n_bonds):
         ref_file = reference_dir / f"bond_{i}_reference.json"
-        bench_file = benchmark_dir / f"bond_{i}_benchmark.json"
-
-        if not ref_file.exists() or not bench_file.exists():
-            console.print(f"[yellow]Skipping bond {i}: missing data[/yellow]")
+        if not ref_file.exists():
             continue
 
-        # Load results
-        reference = TorsionDriveResult.parse_file(str(ref_file))
-        benchmark = TorsionDriveResult.parse_file(str(bench_file))
+        # Check which benchmarks have this bond
+        available_benchmarks = []
+        for bench_dir, label in zip(benchmark_dirs, benchmark_labels):
+            bench_file = bench_dir / f"bond_{i}_benchmark.json"
+            if bench_file.exists():
+                available_benchmarks.append((bench_dir, label, bench_file))
 
-        # Calculate data
-        data = calculate_energy_rmsd(reference, benchmark)
+        if not available_benchmarks:
+            console.print(f"[yellow]Skipping bond {i}: no benchmark data[/yellow]")
+            continue
+
+        # Load reference
+        reference = TorsionDriveResult.parse_file(str(ref_file))
 
         # Create plots
         bond_dir = output_dir / f"bond_{i}"
         bond_dir.mkdir(exist_ok=True)
 
-        # Energy plot
-        fig_energy = plot_energy_profile(
-            data,
-            reference_label=reference_label,
-            target_label=benchmark_label,
+        # Draw molecule with this specific bond highlighted
+        draw_molecule_with_bonds(
+            molecule,
+            all_dihedrals,
+            bond_dir / "molecule_bond_highlighted.png",
+            highlight_specific=i,
         )
+
+        # Create multi-benchmark energy and RMSD plots
+        fig_energy, ax_energy = plt.subplots(figsize=(8, 6))
+        fig_rmsd, ax_rmsd = plt.subplots(figsize=(8, 6))
+
+        # Plot reference data once
+        first_benchmark = TorsionDriveResult.parse_file(str(available_benchmarks[0][2]))
+        first_data = calculate_energy_rmsd(reference, first_benchmark)
+        ax_energy.plot(
+            first_data["angles"],
+            first_data["ref_energies"],
+            marker="o",
+            label=reference_label,
+            linewidth=2,
+        )
+
+        # Plot each benchmark
+        for bench_dir, label, bench_file in available_benchmarks:
+            benchmark = TorsionDriveResult.parse_file(str(bench_file))
+            data = calculate_energy_rmsd(reference, benchmark)
+
+            # Add to energy plot
+            ax_energy.plot(
+                data["angles"],
+                data["target_energies"],
+                marker="x",
+                label=label,
+                linewidth=2,
+            )
+
+            # Add to RMSD plot
+            ax_rmsd.plot(
+                data["angles"],
+                data["rmsds"],
+                marker="o",
+                label=label,
+                linewidth=2,
+            )
+
+            # Calculate metrics
+            rmse = calculate_rmse(data["ref_energies"], data["target_energies"])
+            max_rmsd = float(np.max(data["rmsds"]))
+
+            summaries[label].append(
+                {
+                    "bond": i,
+                    "dihedral": mol_info["dihedrals"][i],
+                    "energy_rmse_kj_mol": round(rmse, 3),
+                    "max_rmsd_angstrom": round(max_rmsd, 3),
+                }
+            )
+
+            console.print(
+                f"[green]✓ Bond {i} ({label}): RMSE={rmse:.2f} kJ/mol, "
+                f"Max RMSD={max_rmsd:.3f} Å[/green]"
+            )
+
+        # Finalize energy plot
+        ax_energy.set_xlabel("Dihedral Angle (°)", fontsize=12)
+        ax_energy.set_ylabel("Relative Energy (kJ/mol)", fontsize=12)
+        ax_energy.legend(fontsize=10)
+        ax_energy.grid(True)
+        plt.tight_layout()
         fig_energy.savefig(bond_dir / "energy.pdf")
         fig_energy.savefig(bond_dir / "energy.png", dpi=300)
         plt.close(fig_energy)
 
-        # RMSD plot
-        fig_rmsd = plot_rmsd_profile(data, target_label=benchmark_label)
+        # Finalize RMSD plot
+        ax_rmsd.set_xlabel("Dihedral Angle (°)", fontsize=12)
+        ax_rmsd.set_ylabel("RMSD (Å)", fontsize=12)
+        ax_rmsd.legend(fontsize=10)
+        ax_rmsd.grid(True)
+        plt.tight_layout()
         fig_rmsd.savefig(bond_dir / "rmsd.pdf")
         fig_rmsd.savefig(bond_dir / "rmsd.png", dpi=300)
         plt.close(fig_rmsd)
 
-        # Calculate metrics
-        rmse = calculate_rmse(data["ref_energies"], data["target_energies"])
-        max_rmsd = float(np.max(data["rmsds"]))
-
-        summary.append(
-            {
-                "bond": i,
-                "dihedral": mol_info["dihedrals"][i],
-                "energy_rmse_kj_mol": round(rmse, 3),
-                "max_rmsd_angstrom": round(max_rmsd, 3),
-            }
-        )
-
-        console.print(
-            f"[green]✓ Bond {i}: RMSE={rmse:.2f} kJ/mol, "
-            f"Max RMSD={max_rmsd:.3f} Å[/green]"
-        )
-
-    # Save summary
-    with open(output_dir / "summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    # Save summaries
+    for label, summary in summaries.items():
+        safe_label = label.replace(" ", "_").replace("/", "_")
+        summary_file = output_dir / f"summary_{safe_label}.json"
+        with open(summary_file, "w") as f:
+            json.dump(summary, f, indent=2)
 
     # Copy molecule image
     import shutil
@@ -817,7 +905,7 @@ def create_analysis_plots(
 def run_reference_scans(
     smiles: str = typer.Argument(..., help="SMILES string of molecule"),
     method: str = typer.Option(
-        "EGRET_1.model",
+        "small",
         help="QM method for reference calculations",
     ),
     program: str = typer.Option(
@@ -836,12 +924,16 @@ def run_reference_scans(
         15,
         help="Grid spacing in degrees",
     ),
+    bond_indices: Optional[str] = typer.Option(
+        None,
+        help="Comma-separated bond indices to scan (e.g., '0,2,5'). If not provided, scan all rotatable bonds.",
+    ),
     ncores: int = typer.Option(
-        1,
+        30,
         help="Number of CPU cores",
     ),
     memory: float = typer.Option(
-        4.0,
+        20.0,
         help="Memory in GB",
     ),
 ) -> None:
@@ -849,6 +941,11 @@ def run_reference_scans(
     Run reference QM torsiondrives for all rotatable bonds in a molecule.
     """
     model = Model(method=method, basis=basis)
+
+    # Parse bond indices if provided
+    parsed_indices = None
+    if bond_indices:
+        parsed_indices = [int(x.strip()) for x in bond_indices.split(",")]
 
     run_reference_torsiondrives(
         smiles=smiles,
@@ -858,6 +955,7 @@ def run_reference_scans(
         grid_spacing=grid_spacing,
         ncores=ncores,
         memory=memory,
+        bond_indices=parsed_indices,
     )
 
 
@@ -883,19 +981,29 @@ def run_benchmark_scans(
         Path("benchmark_scans"),
         help="Output directory for benchmark scans",
     ),
+    bond_indices: Optional[str] = typer.Option(
+        None,
+        help="Comma-separated bond indices to benchmark (e.g., '0,2,5'). If not provided, auto-detect from reference directory.",
+    ),
     ncores: int = typer.Option(
-        1,
+        30,
         help="Number of CPU cores",
     ),
     memory: float = typer.Option(
-        1.0,
+        20.0,
         help="Memory in GB",
     ),
 ) -> None:
     """
     Run benchmark force field torsiondrives using reference geometries.
+    By default, only runs benchmarks for bonds that have reference data.
     """
     model = Model(method=method, basis=basis)
+
+    # Parse bond indices if provided
+    parsed_indices = None
+    if bond_indices:
+        parsed_indices = [int(x.strip()) for x in bond_indices.split(",")]
 
     run_benchmark_torsiondrives(
         reference_dir=reference_dir,
@@ -904,6 +1012,7 @@ def run_benchmark_scans(
         program=program,
         ncores=ncores,
         memory=memory,
+        bond_indices=parsed_indices,
     )
 
 
@@ -913,9 +1022,9 @@ def plot(
         ...,
         help="Directory containing reference scan results",
     ),
-    benchmark_dir: Path = typer.Argument(
+    benchmark_dirs: List[Path] = typer.Argument(
         ...,
-        help="Directory containing benchmark scan results",
+        help="One or more directories containing benchmark scan results",
     ),
     output_dir: Path = typer.Option(
         Path("analysis"),
@@ -925,25 +1034,37 @@ def plot(
         "QM Reference",
         help="Label for reference data in plots",
     ),
-    benchmark_label: str = typer.Option(
-        "Force Field",
-        help="Label for benchmark data in plots",
+    benchmark_labels: Optional[str] = typer.Option(
+        None,
+        help="Comma-separated labels for benchmark methods (e.g., 'UFF,MMFF94'). If not provided, uses directory names.",
     ),
 ) -> None:
     """
     Create energy and RMSD plots comparing reference and benchmark scans.
+    Can compare multiple benchmark methods simultaneously.
     """
+    # Parse benchmark labels if provided
+    parsed_labels = None
+    if benchmark_labels:
+        parsed_labels = [x.strip() for x in benchmark_labels.split(",")]
+        if len(parsed_labels) != len(benchmark_dirs):
+            console.print(
+                f"[red]Error: Number of labels ({len(parsed_labels)}) must match number of benchmark directories ({len(benchmark_dirs)})[/red]"
+            )
+            raise typer.Exit(1)
+
     create_analysis_plots(
         reference_dir=reference_dir,
-        benchmark_dir=benchmark_dir,
+        benchmark_dirs=benchmark_dirs,
         output_dir=output_dir,
         reference_label=reference_label,
-        benchmark_label=benchmark_label,
+        benchmark_labels=parsed_labels,
     )
 
 
 def cli():
-    app()
+    with plt.style.context("ggplot"):
+        app()
 
 
 if __name__ == "__main__":
