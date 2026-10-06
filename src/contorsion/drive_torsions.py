@@ -25,6 +25,7 @@ from qcelemental.models.procedures import (
     TorsionDriveResult,
 )
 from qcengine.units import ureg
+from qcengine.programs.mace import MACEHarness
 import qcengine
 
 from openff.toolkit.topology import Molecule, Atom, Bond
@@ -37,6 +38,51 @@ logging.disable(level=logging.CRITICAL)
 # Create CLI app and console
 app = typer.Typer(help="Drive torsions and benchmark force fields")
 console = Console()
+
+
+# ============================================================================
+# QCEngine MACE GPU fix
+# ============================================================================
+
+
+class _DeviceAwareModel:
+    """Move inputs to the model's device and outputs back to the CPU.
+
+    QCEngine's MACE harness moves the model to CUDA when available but leaves
+    the input tensors on the CPU, causing a device mismatch error.
+    """
+
+    def __init__(self, model):
+        self.model = model
+        self.device = None
+
+    def to(self, device):
+        self.model.to(device)
+        self.device = device
+        return self
+
+    def __call__(self, data, **kwargs):
+        import torch
+
+        data = {
+            k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+            for k, v in data.items()
+        }
+        output = self.model(data, **kwargs)
+        return {
+            k: v.detach().cpu() if isinstance(v, torch.Tensor) else v
+            for k, v in output.items()
+        }
+
+
+class _GPUMACEHarness(MACEHarness):
+    def load_model(self, name: str):
+        model, r_max, atomic_numbers = super().load_model(name)
+        return _DeviceAwareModel(model), r_max, atomic_numbers
+
+
+qcengine.unregister_program("mace")
+qcengine.register_program(_GPUMACEHarness())
 
 
 # ============================================================================
