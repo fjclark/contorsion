@@ -509,6 +509,56 @@ def draw_molecule_with_bonds(
     drawer.FinishDrawing()
     drawer.WriteDrawingText(str(output_path))
 
+## ============================================================================
+## QCMolecules to SDF
+## ============================================================================
+BOHR_TO_ANGSTROM = 0.529177210903
+
+
+def qc_molecule_to_sdf(
+    qc_mol,
+    mapped_smiles,
+    output_file,
+):
+    """Write a QCElemental Molecule as an SDF using mapped SMILES."""
+
+    # Build molecular graph from mapped SMILES
+    mol = Chem.MolFromSmiles(mapped_smiles)
+
+    if mol is None:
+        raise ValueError(
+            f"Could not parse mapped SMILES: {mapped_smiles}"
+        )
+
+    # Make explicit hydrogens part of the RDKit molecule
+    mol = Chem.AddHs(mol)
+
+    # QCElemental geometry is in bohr; RDKit uses angstrom
+    coords = np.asarray(qc_mol.geometry, dtype=float) * BOHR_TO_ANGSTROM
+
+    if len(coords) != mol.GetNumAtoms():
+        raise ValueError(
+            f"Atom count mismatch: QC molecule has {len(coords)} atoms, "
+            f"mapped SMILES has {mol.GetNumAtoms()} atoms."
+        )
+
+    # Add optimized geometry
+    conf = Chem.Conformer(mol.GetNumAtoms())
+
+    for atom_idx, xyz in enumerate(coords):
+        conf.SetAtomPosition(
+            atom_idx,
+            (float(xyz[0]), float(xyz[1]), float(xyz[2])),
+        )
+
+    mol.RemoveAllConformers()
+    mol.AddConformer(conf, assignId=True)
+
+    # Write SDF
+    writer = Chem.SDWriter(str(output_file))
+    writer.write(mol)
+    writer.close()
+
 
 # ============================================================================
 # High-level workflow functions
@@ -628,7 +678,6 @@ def run_reference_torsiondrives(
         console.print(f"[green]✓ Bond {bond_idx} complete[/green]")
 
     return results
-
 
 def run_benchmark_torsiondrives(
     reference_dir: Path,
@@ -763,8 +812,38 @@ def run_benchmark_torsiondrives(
         with open(result_file, "w") as f:
             f.write(benchmark_result.json())
 
+        # Extract lowest-energy final conformation
+        if benchmark_result.final_energies:
+            best_angle = min(
+                benchmark_result.final_energies,
+                key=benchmark_result.final_energies.get,
+            )
+
+            best_energy = benchmark_result.final_energies[best_angle]
+            best_mol = benchmark_result.final_molecules[best_angle]
+
+            # Get mapped SMILES from the final molecule
+            mapped_smiles = (
+                best_mol.identifiers
+                .canonical_isomeric_explicit_hydrogen_mapped_smiles
+            )
+
+            # Save lowest energy conformation as SDF
+            sdf_file = output_dir / f"bond_{i}_min_conform.sdf"
+
+            qc_molecule_to_sdf(
+                best_mol,
+                mapped_smiles,
+                sdf_file,
+            )
+
         results[i] = benchmark_result
-        console.print(f"[green]✓ Bond {i} complete[/green]")
+
+        console.print(
+            f"[green]✓ Bond {i} complete "
+            f"(minimum-energy conformation: {best_angle}, "
+            f"energy: {best_energy:.8f})[/green]"
+    )
 
     return results
 
