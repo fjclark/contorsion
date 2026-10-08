@@ -30,7 +30,9 @@ import qcengine
 
 from openff.toolkit.topology import Molecule, Atom, Bond
 from openff.units import unit
+from rdkit import Chem
 from rdkit.Chem import Draw
+from matplotlib.ticker import MultipleLocator
 
 # Set up logging
 logging.disable(level=logging.CRITICAL)
@@ -228,9 +230,10 @@ def run_single_torsiondrive(
     result = qcengine.compute_procedure(
         input_data=td_input,
         procedure="torsiondrive",
-        raise_error=True,
+        raise_error=False,
         local_options={"ncores": ncores, "memory": memory},
     )
+    print(result)
     return result
 
 
@@ -679,6 +682,7 @@ def run_reference_torsiondrives(
 
     return results
 
+
 def run_benchmark_torsiondrives(
     reference_dir: Path,
     model: Model,
@@ -719,6 +723,10 @@ def run_benchmark_torsiondrives(
     # Load molecule info
     with open(reference_dir / "molecule_info.json") as f:
         mol_info = json.load(f)
+
+    n_bonds = mol_info["n_rotatable_bonds"]
+    all_dihedrals = [tuple(d) for d in mol_info["dihedrals"]]
+    smiles = mol_info["smiles"]
 
     dihedrals = [tuple(d) for d in mol_info["dihedrals"]]
 
@@ -836,14 +844,8 @@ def run_benchmark_torsiondrives(
                 mapped_smiles,
                 sdf_file,
             )
-
         results[i] = benchmark_result
-
-        console.print(
-            f"[green]✓ Bond {i} complete "
-            f"(minimum-energy conformation: {best_angle}, "
-            f"energy: {best_energy:.8f})[/green]"
-    )
+        console.print(f"[green]✓ Bond {i} complete[/green]")
 
     return results
 
@@ -895,6 +897,39 @@ def create_analysis_plots(
     # Summary data for each benchmark
     summaries = {label: [] for label in benchmark_labels}
 
+    global_energies = []
+    global_rmsd_max = 0.0
+
+    for i in range(n_bonds):
+        ref_file = reference_dir / f"bond_{i}_reference.json"
+        if not ref_file.exists():
+            continue
+
+        reference = TorsionDriveResult.parse_file(str(ref_file))
+
+        for bench_dir, label in zip(benchmark_dirs, benchmark_labels):
+            bench_file = bench_dir / f"bond_{i}_benchmark.json"
+            if not bench_file.exists():
+                continue
+
+            benchmark = TorsionDriveResult.parse_file(str(bench_file))
+            data = calculate_energy_rmsd(reference, benchmark)
+
+            global_energies.extend(data["ref_energies"])
+            global_energies.extend(data["target_energies"])
+
+            global_rmsd_max = max(
+                global_rmsd_max,
+                float(np.max(data["rmsds"])),
+            )
+
+    global_ymax = float(np.max(global_energies))
+    global_energy_pad = 0.05 * global_ymax
+    global_energy_ymax = global_ymax + global_energy_pad
+
+    global_rmsd_pad = 0.05 * global_rmsd_max
+    global_rmsd_ymax = global_rmsd_max + global_rmsd_pad
+
     for i in range(n_bonds):
         ref_file = reference_dir / f"bond_{i}_reference.json"
         if not ref_file.exists():
@@ -937,14 +972,29 @@ def create_analysis_plots(
             first_data["angles"],
             first_data["ref_energies"],
             marker="o",
+            color="#4D4D4D",
             label=reference_label,
-            linewidth=2,
+            linewidth=2.5
         )
+
+        # Track all values for y-axis limits (reference + every benchmark)
+        all_energies = list(first_data["ref_energies"])
+        all_rmsds = []
+        global_ymax = 0.0
+
 
         # Plot each benchmark
         for bench_dir, label, bench_file in available_benchmarks:
             benchmark = TorsionDriveResult.parse_file(str(bench_file))
             data = calculate_energy_rmsd(reference, benchmark)
+
+            all_energies.extend(data["target_energies"])
+            all_rmsds.extend(data["rmsds"])
+            global_ymax = max(
+        	global_ymax,
+        	np.max(data["ref_energies"]),
+        	np.max(data["target_energies"]),
+            )
 
             # Add to energy plot
             ax_energy.plot(
@@ -982,22 +1032,27 @@ def create_analysis_plots(
                 f"Max RMSD={max_rmsd:.3f} Å[/green]"
             )
 
-        # Finalize energy plot
+        # Finalize energy plot (y-limits from min/max over all energies)
+        global_pad = 0.05 * global_ymax
+        global_ymax += global_pad
+        ax_energy.set_ylim(-1, global_energy_ymax)
+        ax_energy.yaxis.set_major_locator(MultipleLocator(5))
         ax_energy.set_xlabel("Dihedral Angle (°)", fontsize=12)
         ax_energy.set_ylabel("Relative Energy (kJ/mol)", fontsize=12)
         ax_energy.legend(fontsize=10)
         ax_energy.grid(True)
-        plt.tight_layout()
+        fig_energy.tight_layout()
         fig_energy.savefig(bond_dir / "energy.pdf")
         fig_energy.savefig(bond_dir / "energy.png", dpi=300)
         plt.close(fig_energy)
 
-        # Finalize RMSD plot
+        # Finalize RMSD plot (y-limits from min/max over all RMSDs, floor at 0)
+        ax_rmsd.set_ylim(0, global_rmsd_ymax)
         ax_rmsd.set_xlabel("Dihedral Angle (°)", fontsize=12)
         ax_rmsd.set_ylabel("RMSD (Å)", fontsize=12)
         ax_rmsd.legend(fontsize=10)
         ax_rmsd.grid(True)
-        plt.tight_layout()
+        fig_rmsd.tight_layout()
         fig_rmsd.savefig(bond_dir / "rmsd.pdf")
         fig_rmsd.savefig(bond_dir / "rmsd.png", dpi=300)
         plt.close(fig_rmsd)
@@ -1011,7 +1066,6 @@ def create_analysis_plots(
 
     # Copy molecule image
     import shutil
-
     mol_img = reference_dir / "molecule.png"
     if mol_img.exists():
         shutil.copy(mol_img, output_dir / "molecule.png")
