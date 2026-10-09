@@ -230,10 +230,10 @@ def run_single_torsiondrive(
     result = qcengine.compute_procedure(
         input_data=td_input,
         procedure="torsiondrive",
-        raise_error=False,
+        raise_error=True,
         local_options={"ncores": ncores, "memory": memory},
     )
-    print(result)
+    console.print(result)
     return result
 
 
@@ -515,13 +515,10 @@ def draw_molecule_with_bonds(
 ## ============================================================================
 ## QCMolecules to SDF
 ## ============================================================================
-BOHR_TO_ANGSTROM = 0.529177210903
-
-
 def qc_molecule_to_sdf(
-    qc_mol,
-    mapped_smiles,
-    output_file,
+    qc_mol: QCMolecule,
+    mapped_smiles: str,
+    output_file: Path,
 ):
     """Write a QCElemental Molecule as an SDF using mapped SMILES."""
 
@@ -534,10 +531,10 @@ def qc_molecule_to_sdf(
         )
 
     # Make explicit hydrogens part of the RDKit molecule
-    mol = Chem.AddHs(mol)
+    # mol = Chem.AddHs(mol)
 
     # QCElemental geometry is in bohr; RDKit uses angstrom
-    coords = np.asarray(qc_mol.geometry, dtype=float) * BOHR_TO_ANGSTROM
+    coords = np.asarray(qc_mol.geometry, dtype=float) * ureg.bohr2angstroms
 
     if len(coords) != mol.GetNumAtoms():
         raise ValueError(
@@ -677,6 +674,24 @@ def run_reference_torsiondrives(
         with open(result_file, "w") as f:
             f.write(result.json())
 
+        # Save every final conformation as its own SDF
+        if result.final_energies:
+            for angle, energy in result.final_energies.items:
+                mol = result.final_molecules[angle]
+
+                # Get mapped SMILES from the final molecule
+                mapped_smiles = (
+                    mol.identifiers.canonical_isomeric_explicit_hydrogen_mapped_smiles
+                )
+
+            sdf_file = output_dir / f"bond_{bond_idx}_min_conform{angle}.sdf"
+        
+            qc_molecule_to_sdf(
+                mol,
+                mapped_smiles,
+                sdf_file,
+            )
+
         results[bond_idx] = result
         console.print(f"[green]✓ Bond {bond_idx} complete[/green]")
 
@@ -723,10 +738,6 @@ def run_benchmark_torsiondrives(
     # Load molecule info
     with open(reference_dir / "molecule_info.json") as f:
         mol_info = json.load(f)
-
-    n_bonds = mol_info["n_rotatable_bonds"]
-    all_dihedrals = [tuple(d) for d in mol_info["dihedrals"]]
-    smiles = mol_info["smiles"]
 
     dihedrals = [tuple(d) for d in mol_info["dihedrals"]]
 
@@ -820,30 +831,25 @@ def run_benchmark_torsiondrives(
         with open(result_file, "w") as f:
             f.write(benchmark_result.json())
 
-        # Extract lowest-energy final conformation
+        # Save every final conformation as its own SDF
         if benchmark_result.final_energies:
-            best_angle = min(
-                benchmark_result.final_energies,
-                key=benchmark_result.final_energies.get,
-            )
+            for angle, energy in benchmark_result.final_energies.items():
+                mol = benchmark_result.final_molecules[angle]
 
-            best_energy = benchmark_result.final_energies[best_angle]
-            best_mol = benchmark_result.final_molecules[best_angle]
+                # Get mapped SMILES from the final molecule
+                mapped_smiles = (
+                    mol.identifiers
+                    .canonical_isomeric_explicit_hydrogen_mapped_smiles
+                )
 
-            # Get mapped SMILES from the final molecule
-            mapped_smiles = (
-                best_mol.identifiers
-                .canonical_isomeric_explicit_hydrogen_mapped_smiles
-            )
+                sdf_file = output_dir / f"bond_{i}_min_conform{angle}.sdf"
 
-            # Save lowest energy conformation as SDF
-            sdf_file = output_dir / f"bond_{i}_min_conform.sdf"
-
-            qc_molecule_to_sdf(
-                best_mol,
-                mapped_smiles,
-                sdf_file,
-            )
+                qc_molecule_to_sdf(
+                    mol,
+                    mapped_smiles,
+                    sdf_file,
+                )
+                
         results[i] = benchmark_result
         console.print(f"[green]✓ Bond {i} complete[/green]")
 
@@ -900,12 +906,15 @@ def create_analysis_plots(
     global_energies = []
     global_rmsd_max = 0.0
 
+    bond_data = {}
+
     for i in range(n_bonds):
         ref_file = reference_dir / f"bond_{i}_reference.json"
         if not ref_file.exists():
             continue
 
         reference = TorsionDriveResult.parse_file(str(ref_file))
+        benchmarks = []
 
         for bench_dir, label in zip(benchmark_dirs, benchmark_labels):
             bench_file = bench_dir / f"bond_{i}_benchmark.json"
@@ -914,6 +923,7 @@ def create_analysis_plots(
 
             benchmark = TorsionDriveResult.parse_file(str(bench_file))
             data = calculate_energy_rmsd(reference, benchmark)
+            benchmarks.append((label,data))
 
             global_energies.extend(data["ref_energies"])
             global_energies.extend(data["target_energies"])
@@ -922,32 +932,23 @@ def create_analysis_plots(
                 global_rmsd_max,
                 float(np.max(data["rmsds"])),
             )
+        bond_data[i] = {"reference": reference, "benchmarks": benchmarks} # now using this dictionary to store data and use it to load data
 
     global_ymax = float(np.max(global_energies))
-    global_energy_pad = 0.05 * global_ymax
-    global_energy_ymax = global_ymax + global_energy_pad
+    global_energy_ymax = global_ymax + 0.05 * global_ymax
+    global_rmsd_ymax = global_rmsd_max + 0.05 * global_rmsd_max
 
-    global_rmsd_pad = 0.05 * global_rmsd_max
-    global_rmsd_ymax = global_rmsd_max + global_rmsd_pad
+    for i, entry in bond_data.items():
+        benchmarks = entry["benchmarks"]
 
-    for i in range(n_bonds):
         ref_file = reference_dir / f"bond_{i}_reference.json"
+
         if not ref_file.exists():
             continue
 
-        # Check which benchmarks have this bond
-        available_benchmarks = []
-        for bench_dir, label in zip(benchmark_dirs, benchmark_labels):
-            bench_file = bench_dir / f"bond_{i}_benchmark.json"
-            if bench_file.exists():
-                available_benchmarks.append((bench_dir, label, bench_file))
-
-        if not available_benchmarks:
+        if not benchmarks:
             console.print(f"[yellow]Skipping bond {i}: no benchmark data[/yellow]")
             continue
-
-        # Load reference
-        reference = TorsionDriveResult.parse_file(str(ref_file))
 
         # Create plots
         bond_dir = output_dir / f"bond_{i}"
@@ -966,8 +967,7 @@ def create_analysis_plots(
         fig_rmsd, ax_rmsd = plt.subplots(figsize=(8, 6))
 
         # Plot reference data once
-        first_benchmark = TorsionDriveResult.parse_file(str(available_benchmarks[0][2]))
-        first_data = calculate_energy_rmsd(reference, first_benchmark)
+        first_data = benchmarks[0][1]
         ax_energy.plot(
             first_data["angles"],
             first_data["ref_energies"],
@@ -980,26 +980,26 @@ def create_analysis_plots(
         # Track all values for y-axis limits (reference + every benchmark)
         all_energies = list(first_data["ref_energies"])
         all_rmsds = []
-        global_ymax = 0.0
+        global_energy_ymax = 0.0
 
 
         # Plot each benchmark
-        for bench_dir, label, bench_file in available_benchmarks:
+        for label, data in benchmarks:
             benchmark = TorsionDriveResult.parse_file(str(bench_file))
-            data = calculate_energy_rmsd(reference, benchmark)
+            mol = benchmarks[label][data]
 
-            all_energies.extend(data["target_energies"])
-            all_rmsds.extend(data["rmsds"])
-            global_ymax = max(
-        	global_ymax,
-        	np.max(data["ref_energies"]),
-        	np.max(data["target_energies"]),
+            all_energies.extend(mol["target_energies"])
+            all_rmsds.extend(mol["rmsds"])
+            global_energy_ymax = max(
+        	global_energy_ymax,
+        	np.max(mol["ref_energies"]),
+        	np.max(mol["target_energies"]),
             )
 
             # Add to energy plot
             ax_energy.plot(
-                data["angles"],
-                data["target_energies"],
+                mol["angles"],
+                mol["target_energies"],
                 marker="x",
                 label=label,
                 linewidth=2,
@@ -1007,16 +1007,16 @@ def create_analysis_plots(
 
             # Add to RMSD plot
             ax_rmsd.plot(
-                data["angles"],
-                data["rmsds"],
+                mol["angles"],
+                mol["rmsds"],
                 marker="o",
                 label=label,
                 linewidth=2,
             )
 
             # Calculate metrics
-            rmse = calculate_rmse(data["ref_energies"], data["target_energies"])
-            max_rmsd = float(np.max(data["rmsds"]))
+            rmse = calculate_rmse(mol["ref_energies"], mol["target_energies"])
+            max_rmsd = float(np.max(mol["rmsds"]))
 
             summaries[label].append(
                 {
