@@ -530,9 +530,6 @@ def qc_molecule_to_sdf(
             f"Could not parse mapped SMILES: {mapped_smiles}"
         )
 
-    # Make explicit hydrogens part of the RDKit molecule
-    # mol = Chem.AddHs(mol)
-
     # QCElemental geometry is in bohr; RDKit uses angstrom
     coords = np.asarray(qc_mol.geometry, dtype=float) * ureg.bohr2angstroms
 
@@ -684,13 +681,13 @@ def run_reference_torsiondrives(
                     mol.identifiers.canonical_isomeric_explicit_hydrogen_mapped_smiles
                 )
 
-            sdf_file = output_dir / f"bond_{bond_idx}_min_conform{angle}.sdf"
-        
-            qc_molecule_to_sdf(
-                mol,
-                mapped_smiles,
-                sdf_file,
-            )
+                sdf_file = output_dir / f"bond_{bond_idx}_min_conform{angle}.sdf"
+            
+                qc_molecule_to_sdf(
+                    mol,
+                    mapped_smiles,
+                    sdf_file,
+                )
 
         results[bond_idx] = result
         console.print(f"[green]✓ Bond {bond_idx} complete[/green]")
