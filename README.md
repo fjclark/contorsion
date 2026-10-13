@@ -31,12 +31,12 @@ Run reference QM torsiondrives for all rotatable bonds:
 
 ```bash
 contorsion run-reference-scans \
-    "CCO" \
-    --method small \
-    --program mace \
-    --output-dir reference_scans \
-    --grid-spacing 15 \
-    --ncores 4 \
+     "CCO" \
+     --method small \
+     --program mace \
+     --output-dir reference_scans \
+     --grid-spacing 15 \
+     --ncores 4 \
 ```
 
 ### 2. Run Benchmark Scans
@@ -45,12 +45,12 @@ Run force field benchmarks using reference geometries:
 
 ```bash
 contorsion run-benchmark-scans \
-    reference_scans \
-    --method openff_unconstrained-2.2.1.offxml \
-    --program openmm --basis smirnoff \
-    --output-dir benchmark_scans \
-    --ncores 1 \
-    --memory 1.0
+     reference_scans \
+     --method openff_unconstrained-2.2.1.offxml \
+     --program openmm --basis smirnoff \
+     --output-dir benchmark_scans \
+     --ncores 1 \
+     --memory 1.0
 ```
 
 ### 3. Generate Plots
@@ -59,11 +59,21 @@ Create analysis plots comparing reference and benchmark:
 
 ```bash
 contorsion plot \ 
-    reference_scans \
-    benchmark_scans \
-    --output-dir analysis \
-    --reference-label "Mace-Small" \
-    --benchmark-label "Sage"
+     reference_scans \
+     benchmark_scans \
+     --output-dir analysis \
+     --reference-label "Mace-Small" \
+     --benchmark-label "Sage"
+```
+When plotting more than one benchmark:
+
+```bash
+contorsion plot \
+     reference_scans \
+     benchmark_scans benchmark_scans_amber \
+     --output-dir analysis-both \
+     --reference-label "Mace-Small" \
+     --benchmark-labels "Sage,AMBER"
 ```
 
 ## Python API
@@ -72,9 +82,9 @@ contorsion plot \
 from pathlib import Path
 from qcelemental.models.common_models import Model
 from contorsion.drive_torsions import (
-    run_reference_torsiondrives,
-    run_benchmark_torsiondrives,
-    create_analysis_plots,
+     run_reference_torsiondrives,
+     run_benchmark_torsiondrives,
+     create_analysis_plots,
 )
 
 # Run reference scans
