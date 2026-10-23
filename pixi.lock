@@ -253,7 +253,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-system-1.0.0-1.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/linux-64/opencl-headers-2025.06.13-h5888daf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-amber-ff-ports-2025.09.0-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/openff-forcefields-2025.10.1-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/openff-forcefields-2026.09.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-interchange-0.4.8-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-interchange-base-0.4.8-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-0.6.1-pyh87c6ba9_0.conda
@@ -991,7 +991,7 @@ packages:
 - pypi: ./
   name: contorsion
   version: 0.1.0
-  sha256: 8364bb80bb21164973e63048460dea904a02dff94ee2f00124cb851484df81d2
+  sha256: eec7ac336559f0c15002a768744593bd09d5c086ea4257913784625cb0aac41d
   requires_dist:
   - mace-torch<0.3.13
   requires_python: '>=3.11'
@@ -3972,20 +3972,20 @@ packages:
   - pkg:pypi/openff-amber-ff-ports?source=hash-mapping
   size: 222475
   timestamp: 1758297599388
-- conda: https://conda.anaconda.org/conda-forge/noarch/openff-forcefields-2025.10.1-pyhd8ed1ab_0.conda
-  sha256: 0487cb88b0a8f0794a61745a86e0d050e41a3848410cd80f34e824cf80aa14fa
-  md5: 755a961ede9ddb097df00e6a9cae7bb4
+- conda: https://conda.anaconda.org/conda-forge/noarch/openff-forcefields-2026.09.0-pyhd8ed1ab_0.conda
+  sha256: ed1334a8a019ac516d73ed3e16a1d2a071838c719d52dc1ee5f2295603219645
+  md5: e153131b1f6f1b5748128903dd397eb2
   depends:
-  - python >=3.11
+  - python >=3.12
   - setuptools
   constrains:
   - openforcefields ==9999999999
   license: CC-BY-4.0
   license_family: CC
   purls:
-  - pkg:pypi/openforcefields?source=hash-mapping
-  size: 117608
-  timestamp: 1761076927582
+  - pkg:pypi/openforcefields?source=compressed-mapping
+  size: 126365
+  timestamp: 1789590623893
 - conda: https://conda.anaconda.org/conda-forge/noarch/openff-interchange-0.4.8-pyhd8ed1ab_1.conda
   sha256: 426d8bbf771f87cd510abf4c4ea1469b65ee24abcf89c0c6a51039d77849da7e
   md5: 2a0c3300b0d94d9731422503d8107019
