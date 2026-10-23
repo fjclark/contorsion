@@ -984,21 +984,11 @@ def create_analysis_plots(
         # Track all values for y-axis limits (reference + every benchmark)
         all_energies = list(first_data["ref_energies"])
         all_rmsds = []
-        global_energy_ymax = 0.0
-
 
         # Plot each benchmark
-        for label, data in benchmarks:
-            benchmark = TorsionDriveResult.parse_file(str(bench_file))
-            mol = benchmarks[label][data]
-
+        for label, mol in benchmarks:
             all_energies.extend(mol["target_energies"])
             all_rmsds.extend(mol["rmsds"])
-            global_energy_ymax = max(
-        	global_energy_ymax,
-        	np.max(mol["ref_energies"]),
-        	np.max(mol["target_energies"]),
-            )
 
             # Add to energy plot
             ax_energy.plot(
@@ -1037,8 +1027,6 @@ def create_analysis_plots(
             )
 
         # Finalize energy plot (y-limits from min/max over all energies)
-        global_pad = 0.05 * global_ymax
-        global_ymax += global_pad
         ax_energy.set_ylim(-1, global_energy_ymax)
         ax_energy.yaxis.set_major_locator(MultipleLocator(5))
         ax_energy.set_xlabel("Dihedral Angle (°)", fontsize=12)
