@@ -522,13 +522,22 @@ def qc_molecule_to_sdf(
 ):
     """Write a QCElemental Molecule as an SDF using mapped SMILES."""
 
-    # Build molecular graph from mapped SMILES
-    mol = Chem.MolFromSmiles(mapped_smiles)
+    # Build molecular graph from mapped SMILES, keeping explicit hydrogens
+    params = Chem.SmilesParserParams()
+    params.removeHs = False
+    mol = Chem.MolFromSmiles(mapped_smiles, params)
 
     if mol is None:
         raise ValueError(
             f"Could not parse mapped SMILES: {mapped_smiles}"
         )
+
+    # Reorder atoms so RDKit index i matches map number i + 1 (QC geometry order)
+    map_order = sorted(
+        range(mol.GetNumAtoms()),
+        key=lambda i: mol.GetAtomWithIdx(i).GetAtomMapNum(),
+    )
+    mol = Chem.RenumberAtoms(mol, map_order)
 
     # QCElemental geometry is in bohr; RDKit uses angstrom
     coords = np.asarray(qc_mol.geometry, dtype=float) * ureg.bohr2angstroms
@@ -672,10 +681,8 @@ def run_reference_torsiondrives(
             f.write(result.json())
 
         # Save every final conformation as its own SDF
-        if result.final_energies:
-            for angle, energy in result.final_energies.items:
-                mol = result.final_molecules[angle]
-
+        if result.final_molecules:
+            for angle, mol in result.final_molecules.items():
                 # Get mapped SMILES from the final molecule
                 mapped_smiles = (
                     mol.identifiers.canonical_isomeric_explicit_hydrogen_mapped_smiles
