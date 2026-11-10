@@ -39,6 +39,24 @@ contorsion run-reference-scans \
      --ncores 4 \
 ```
 
+#### Reference scans with OpenMM-ML models
+
+Any potential supported by [OpenMM-ML](https://github.com/openmm/openmm-ml) can be used with
+`--program openmm-ml`, passing the OpenMM-ML model name as `--method`. For example, ORB v3
+conservative (trained on OMol25):
+
+```bash
+contorsion run-reference-scans \
+     "CCOC(=O)c1ccccc1" \
+     --program openmm-ml \
+     --method orb-v3-conservative-omol \
+     --output-dir reference_scans_orb
+```
+
+The molecule's total charge and multiplicity are passed to the model. The package providing the
+model must be installed (`orb-models` is included in the pixi environment; others such as
+`aimnet` or `torchani` need adding).
+
 ### 2. Run Benchmark Scans
 
 Run force field benchmarks using reference geometries:

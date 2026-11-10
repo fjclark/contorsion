@@ -28,6 +28,8 @@ from qcengine.units import ureg
 from qcengine.programs.mace import MACEHarness
 import qcengine
 
+from contorsion.openmm_ml_harness import OpenMMMLHarness
+
 from openff.toolkit.topology import Molecule, Atom, Bond
 from openff.units import unit
 from rdkit import Chem
@@ -85,6 +87,11 @@ class _GPUMACEHarness(MACEHarness):
 
 qcengine.unregister_program("mace")
 qcengine.register_program(_GPUMACEHarness())
+
+# Any OpenMM-ML potential, e.g. `--program openmm-ml --method orb-v3-conservative-omol`
+if "openmm-ml" in qcengine.list_all_programs():
+    qcengine.unregister_program("openmm-ml")
+qcengine.register_program(OpenMMMLHarness())
 
 
 # ============================================================================
@@ -1077,11 +1084,14 @@ def run_reference_scans(
     smiles: str = typer.Argument(..., help="SMILES string of molecule"),
     method: str = typer.Option(
         "small",
-        help="QM method for reference calculations",
+        help=(
+            "Method for reference calculations. With --program openmm-ml, any "
+            "OpenMM-ML model name, e.g. 'orb-v3-conservative-omol'."
+        ),
     ),
     program: str = typer.Option(
         "mace",
-        help="QCEngine program to use",
+        help="QCEngine program to use (e.g. 'mace', 'openmm-ml', 'psi4')",
     ),
     basis: Optional[str] = typer.Option(
         None,
@@ -1138,11 +1148,14 @@ def run_benchmark_scans(
     ),
     method: str = typer.Option(
         "UFF",
-        help="Force field method name",
+        help=(
+            "Force field or model name. With --program openmm-ml, any OpenMM-ML "
+            "model name, e.g. 'orb-v3-conservative-omol'."
+        ),
     ),
     program: str = typer.Option(
         "mace",
-        help="QCEngine program to use",
+        help="QCEngine program to use (e.g. 'openmm', 'mace', 'openmm-ml')",
     ),
     basis: Optional[str] = typer.Option(
         None,

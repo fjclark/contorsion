@@ -18,6 +18,9 @@ platforms = ["linux-64"]
 
 [tool.pixi.pypi-dependencies]
 contorsion = { path = ".", editable = true }
+orb-models = ">=0.5.5"
+# Upstream cached-path caps rich (allenai/cached_path#263); fork lifts the cap
+cached-path = { git = "https://github.com/fjclark/cached_path.git", rev = "1cb8bdecd22e3af70182b8075bc86d7c18184c9e" }
 
 [tool.pixi.tasks]
 
@@ -25,15 +28,24 @@ contorsion = { path = ".", editable = true }
 openff-toolkit = ">=0.17.1,<0.18"
 typer = ">=0.20.0,<0.21"
 rich = ">=14.2.0,<15"
-numpy = ">=2.3.4,<3"
+# openff-interchange 0.4.8 breaks with numpy >= 2.4
+numpy = ">=2.3.4,<2.4"
 matplotlib = ">=3.10.7,<4"
 qcelemental = ">=0.29.0,<0.30"
 qcengine = ">=0.33.0,<0.34"
 rdkit = ">=2025.3.6,<2026"
 openmmforcefields = ">=0.14.2,<0.15"
 torsiondrive = ">=1.2.0,<2"
-pytorch-gpu = "2.6.*"
+pytorch-gpu = ">=2.8.0"
+cuda-version = "12.9.*"
+# 3.13 requires building dm-tree (Orb dependency) from source
+python = "3.12.*"
+openmm = ">=8.5.0"
+openmm-ml = ">=1.6"
+ase = "*"
+# warp-lang >= 1.12 is incompatible with nvalchemi-toolkit-ops (Orb dependency)
+warp-lang = "==1.11.1"
 openff-forcefields = ">=2026.1.0"
 
 [tool.pixi.system-requirements]
-cuda = "12"
+cuda = "12.9"
