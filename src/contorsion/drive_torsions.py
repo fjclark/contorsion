@@ -324,8 +324,8 @@ def calculate_energy_rmsd(
     Dict[str, NDArray[np.floating]]
         Dictionary with keys:
         - "angles": angles in degrees
-        - "ref_energies": reference energies in kJ/mol
-        - "target_energies": target energies in kJ/mol
+        - "ref_energies": reference energies in kcal/mol
+        - "target_energies": target energies in kcal/mol
         - "rmsds": RMSD values in Angstrom
     """
     angles = []
@@ -352,11 +352,11 @@ def calculate_energy_rmsd(
     # Convert to numpy arrays and normalize energies
     ref_energies = np.array(ref_energies_list)
     ref_energies -= ref_energies.min()
-    ref_energies *= ureg.conversion_factor("hartree", "kilojoule/mol")
+    ref_energies *= ureg.conversion_factor("hartree", "kilocalorie/mol")
 
     target_energies = np.array(target_energies_list)
     target_energies -= target_energies.min()
-    target_energies *= ureg.conversion_factor("hartree", "kilojoule/mol")
+    target_energies *= ureg.conversion_factor("hartree", "kilocalorie/mol")
 
     return {
         "angles": np.array(angles),
@@ -431,7 +431,7 @@ def plot_energy_profile(
         linewidth=2,
     )
     ax.set_xlabel("Dihedral Angle (°)", fontsize=12)
-    ax.set_ylabel("Relative Energy (kJ/mol)", fontsize=12)
+    ax.set_ylabel("Relative Energy (kcal/mol)", fontsize=12)
     ax.legend(fontsize=10)
     ax.grid(True)
     plt.tight_layout()
@@ -1016,21 +1016,21 @@ def create_analysis_plots(
                 {
                     "bond": i,
                     "dihedral": mol_info["dihedrals"][i],
-                    "energy_rmse_kj_mol": round(rmse, 3),
+                    "energy_rmse_kcal_mol": round(rmse, 3),
                     "max_rmsd_angstrom": round(max_rmsd, 3),
                 }
             )
 
             console.print(
-                f"[green]✓ Bond {i} ({label}): RMSE={rmse:.2f} kJ/mol, "
+                f"[green]✓ Bond {i} ({label}): RMSE={rmse:.2f} kcal/mol, "
                 f"Max RMSD={max_rmsd:.3f} Å[/green]"
             )
 
         # Finalize energy plot (y-limits from min/max over all energies)
-        ax_energy.set_ylim(-1, global_energy_ymax)
-        ax_energy.yaxis.set_major_locator(MultipleLocator(5))
+        ax_energy.set_ylim(-0.25, global_energy_ymax)
+        ax_energy.yaxis.set_major_locator(MultipleLocator(1))
         ax_energy.set_xlabel("Dihedral Angle (°)", fontsize=12)
-        ax_energy.set_ylabel("Relative Energy (kJ/mol)", fontsize=12)
+        ax_energy.set_ylabel("Relative Energy (kcal/mol)", fontsize=12)
         ax_energy.legend(fontsize=10)
         ax_energy.grid(True)
         fig_energy.tight_layout()
