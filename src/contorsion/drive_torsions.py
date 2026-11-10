@@ -33,7 +33,8 @@ from contorsion.openmm_ml_harness import OpenMMMLHarness
 from openff.toolkit.topology import Molecule, Atom, Bond
 from openff.units import unit
 from rdkit import Chem
-from rdkit.Chem import Draw
+from rdkit.Chem import Draw, rdDepictor
+from rdkit.Geometry import Point2D
 from matplotlib.ticker import MultipleLocator
 
 # Set up logging
@@ -501,21 +502,51 @@ def draw_molecule_with_bonds(
         If provided, only highlight the dihedral at this index.
         Otherwise highlight all dihedrals.
     """
-    rdkit_mol = molecule.to_rdkit()
-    Draw.rdDepictor.Compute2DCoords(rdkit_mol)
-
     # Determine which atoms to highlight
     if highlight_specific is not None and 0 <= highlight_specific < len(dihedrals):
         # Highlight only the specific dihedral
-        highlight_atoms = list(dihedrals[highlight_specific])
+        highlight_atoms = set(dihedrals[highlight_specific])
     else:
         # Flatten all dihedrals to get all highlighted atoms
-        highlight_atoms = list(set(atom for dihedral in dihedrals for atom in dihedral))
+        highlight_atoms = set(atom for dihedral in dihedrals for atom in dihedral)
 
-    # Create drawing options to include atom indices
+    # Label each atom with its original index, so labels stay correct after
+    # hydrogens are removed and the remaining atoms are renumbered
+    rdkit_mol = molecule.to_rdkit()
+    for atom in rdkit_mol.GetAtoms():
+        atom.SetProp("atomNote", str(atom.GetIdx()))
+        # Mark hydrogens in the highlighted dihedrals so they are kept below
+        if atom.GetAtomicNum() == 1 and atom.GetIdx() in highlight_atoms:
+            atom.SetAtomMapNum(1)
+
+    # Only show explicit hydrogens where necessary: those in highlighted
+    # dihedrals (plus any RDKit needs, e.g. to define stereochemistry)
+    params = Chem.RemoveHsParameters()
+    params.removeMapped = False
+    rdkit_mol = Chem.RemoveHs(rdkit_mol, params)
+    for atom in rdkit_mol.GetAtoms():
+        atom.SetAtomMapNum(0)
+
+    # Convert to 2D: lay out the heavy-atom skeleton first, then place any
+    # remaining hydrogens around it, which avoids cluttered, overlapping depictions
+    heavy_atoms = [a.GetIdx() for a in rdkit_mol.GetAtoms() if a.GetAtomicNum() > 1]
+    heavy_mol = Chem.RemoveAllHs(rdkit_mol)
+    rdDepictor.Compute2DCoords(heavy_mol)
+    heavy_conf = heavy_mol.GetConformer()
+    coord_map = {
+        idx: Point2D(*list(heavy_conf.GetAtomPosition(i))[:2])
+        for i, idx in enumerate(heavy_atoms)
+    }
+    rdDepictor.Compute2DCoords(rdkit_mol, coordMap=coord_map)
+
+    highlight_idxs = [
+        atom.GetIdx()
+        for atom in rdkit_mol.GetAtoms()
+        if int(atom.GetProp("atomNote")) in highlight_atoms
+    ]
+
     drawer = Draw.MolDraw2DCairo(800, 800)
-    drawer.drawOptions().addAtomIndices = True
-    drawer.DrawMolecule(rdkit_mol, highlightAtoms=highlight_atoms)
+    drawer.DrawMolecule(rdkit_mol, highlightAtoms=highlight_idxs)
     drawer.FinishDrawing()
     drawer.WriteDrawingText(str(output_path))
 
