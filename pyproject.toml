@@ -46,6 +46,7 @@ ase = "*"
 # warp-lang >= 1.12 is incompatible with nvalchemi-toolkit-ops (Orb dependency)
 warp-lang = "==1.11.1"
 openff-forcefields = ">=2026.1.0"
+cuda-cudart-dev = ">=12.9.79,<13"
 
 [tool.pixi.system-requirements]
 cuda = "12.9"
