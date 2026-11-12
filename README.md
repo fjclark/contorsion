@@ -71,6 +71,19 @@ contorsion run-benchmark-scans \
      --memory 1.0
 ```
 
+To keep part of the reference geometry fixed (e.g. a ring pucker), freeze extra dihedrals at their
+reference values:
+
+```bash
+contorsion run-benchmark-scans \
+     reference_scans \
+     --method openff_unconstrained-2.3.0.offxml \
+     --program openmm --basis smirnoff \
+     --bond-indices 2 \
+     --freeze-dihedrals "16,17,18,19;18,19,20,16" \
+     --output-dir benchmark_scans_ringfrozen
+```
+
 ### 3. Generate Plots
 
 Create analysis plots comparing reference and benchmark:

@@ -252,6 +252,7 @@ def run_constrained_optimization(
     optimization_keywords: Dict[str, Any],
     ncores: int = 30,
     memory: float = 20.0,
+    extra_frozen_dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
 ) -> Tuple[QCMolecule, float, bool]:
     """
     Run a constrained geometry optimization with frozen dihedral.
@@ -270,6 +271,9 @@ def run_constrained_optimization(
         Number of cores
     memory : float, default=20.0
         Memory in GB
+    extra_frozen_dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Additional dihedrals to freeze at their starting values (e.g. ring
+        torsions, to keep a ring pucker fixed)
 
     Returns
     -------
@@ -283,7 +287,10 @@ def run_constrained_optimization(
 
     opt_keywords = optimization_keywords.copy()
     opt_keywords["constraints"] = {
-        "freeze": [{"type": "dihedral", "indices": list(dihedral)}]
+        "freeze": [
+            {"type": "dihedral", "indices": list(d)}
+            for d in [dihedral, *(extra_frozen_dihedrals or [])]
+        ]
     }
 
     opt_task = OptimizationInput(
@@ -748,6 +755,7 @@ def run_benchmark_torsiondrives(
     ncores: int = 30,
     memory: float = 20.0,
     bond_indices: Optional[List[int]] = None,
+    extra_frozen_dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
 ) -> Dict[int, TorsionDriveResult]:
     """
     Run benchmark torsiondrives using reference geometries.
@@ -769,6 +777,9 @@ def run_benchmark_torsiondrives(
     bond_indices : Optional[List[int]], default=None
         Specific bond indices to benchmark. If None, automatically detect
         which bonds are present in the reference directory.
+    extra_frozen_dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Additional dihedrals frozen at their reference values in every
+        optimization (e.g. ring torsions, to keep the reference ring pucker)
 
     Returns
     -------
@@ -815,7 +826,14 @@ def run_benchmark_torsiondrives(
         # Build benchmark result
         benchmark_result = TorsionDriveResult(
             keywords=reference.keywords,
-            extras=reference.extras,
+            extras={
+                **reference.extras,
+                **(
+                    {"extra_frozen_dihedrals": [list(d) for d in extra_frozen_dihedrals]}
+                    if extra_frozen_dihedrals
+                    else {}
+                ),
+            },
             input_specification=QCInputSpecification(
                 driver="gradient",
                 model=model,
@@ -852,6 +870,7 @@ def run_benchmark_torsiondrives(
                     opt_keywords,
                     ncores=ncores,
                     memory=memory,
+                    extra_frozen_dihedrals=extra_frozen_dihedrals,
                 )
                 benchmark_result.final_molecules[angle_key] = final_mol
                 benchmark_result.final_energies[angle_key] = energy
@@ -1200,6 +1219,13 @@ def run_benchmark_scans(
         None,
         help="Comma-separated bond indices to benchmark (e.g., '0,2,5'). If not provided, auto-detect from reference directory.",
     ),
+    freeze_dihedrals: Optional[str] = typer.Option(
+        None,
+        help=(
+            "Extra dihedrals to freeze at their reference values, as semicolon-separated "
+            "comma-separated quadruples (e.g. '16,17,18,19;18,19,20,16' to keep a ring pucker)."
+        ),
+    ),
     ncores: int = typer.Option(
         30,
         help="Number of CPU cores",
@@ -1220,6 +1246,15 @@ def run_benchmark_scans(
     if bond_indices:
         parsed_indices = [int(x.strip()) for x in bond_indices.split(",")]
 
+    parsed_frozen = None
+    if freeze_dihedrals:
+        parsed_frozen = [
+            tuple(int(x) for x in quad.split(",")) for quad in freeze_dihedrals.split(";")
+        ]
+        if any(len(q) != 4 for q in parsed_frozen):
+            console.print("[red]Error: each frozen dihedral needs exactly 4 atom indices[/red]")
+            raise typer.Exit(1)
+
     run_benchmark_torsiondrives(
         reference_dir=reference_dir,
         model=model,
@@ -1228,6 +1263,7 @@ def run_benchmark_scans(
         ncores=ncores,
         memory=memory,
         bond_indices=parsed_indices,
+        extra_frozen_dihedrals=parsed_frozen,
     )
 
 
