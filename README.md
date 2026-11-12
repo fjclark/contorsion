@@ -57,6 +57,26 @@ The molecule's total charge and multiplicity are passed to the model. The packag
 model must be installed (`orb-models` is included in the pixi environment; others such as
 `aimnet` or `torchani` need adding).
 
+#### Custom dihedrals, ranges and starting geometries (e.g. ring torsions)
+
+By default every rotatable bond is scanned over 360° from a generated conformer. To scan other
+dihedrals, such as the endocyclic torsions of a ring, give them explicitly, limit the range, and
+optionally start from an existing geometry (an SDF written by contorsion, so the atom order matches):
+
+```bash
+contorsion run-reference-scans \
+     "<smiles>" \
+     --program openmm-ml --method orb-v3-conservative-omol \
+     --dihedrals "16,17,18,19;17,18,19,20" \
+     --dihedral-range=-60,60 --grid-spacing 5 \
+     --initial-geometry reference_scans/bond_2_min_conform75.sdf \
+     --output-dir ring_scans
+```
+
+The requested dihedrals are saved in `molecule_info.json` as `bond_0`, `bond_1`, ..., so
+`run-benchmark-scans` and `plot` work on the output as usual. Plots use whatever grid angles the
+reference scan contains.
+
 ### 2. Run Benchmark Scans
 
 Run force field benchmarks using reference geometries:
