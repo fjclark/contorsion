@@ -73,6 +73,9 @@ contorsion run-reference-scans \
      --output-dir ring_scans
 ```
 
+Add `--freeze-dihedrals "16,17,18,19;18,19,20,16"` to hold extra dihedrals (e.g. a ring pucker) at
+their starting values throughout every scan. `run-benchmark-scans` takes the same option.
+
 The requested dihedrals are saved in `molecule_info.json` as `bond_0`, `bond_1`, ..., so
 `run-benchmark-scans` and `plot` work on the output as usual. Plots use whatever grid angles the
 reference scan contains.

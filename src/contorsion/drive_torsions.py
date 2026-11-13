@@ -156,6 +156,7 @@ def build_torsiondrive_input(
     grid_spacing: int = 15,
     optimization_keywords: Optional[Dict[str, Any]] = None,
     dihedral_range: Optional[Tuple[int, int]] = None,
+    extra_frozen_dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
 ) -> TorsionDriveInput:
     """
     Build a TorsionDriveInput for a specific dihedral.
@@ -177,6 +178,9 @@ def build_torsiondrive_input(
     dihedral_range : Optional[Tuple[int, int]], default=None
         Limit the scan to this (min, max) range in degrees, e.g. (-60, 60)
         for ring torsions. If None, scan the full 360 degrees
+    extra_frozen_dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Dihedrals frozen at their starting values throughout the scan (e.g.
+        ring torsions, to keep a ring pucker fixed)
 
     Returns
     -------
@@ -192,6 +196,16 @@ def build_torsiondrive_input(
             "qccnv": True,
             "epsilon": 0.0,
             "program": program,
+        }
+    if extra_frozen_dihedrals:
+        # torsiondrive adds its own "set" constraint alongside these
+        optimization_keywords = {
+            **optimization_keywords,
+            "constraints": {
+                "freeze": [
+                    {"type": "dihedral", "indices": list(d)} for d in extra_frozen_dihedrals
+                ]
+            },
         }
 
     keywords = TDKeywords(
@@ -298,6 +312,8 @@ def run_constrained_optimization(
         "freeze": [
             {"type": "dihedral", "indices": list(d)}
             for d in [dihedral, *(extra_frozen_dihedrals or [])]
+            # skip extra entries that are the scanned dihedral itself (either direction)
+            if d is dihedral or (tuple(d) != tuple(dihedral) and tuple(d) != tuple(dihedral)[::-1])
         ]
     }
 
@@ -641,6 +657,7 @@ def run_reference_torsiondrives(
     dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
     dihedral_range: Optional[Tuple[int, int]] = None,
     initial_geometry: Optional[Path] = None,
+    extra_frozen_dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
 ) -> Dict[int, TorsionDriveResult]:
     """
     Run reference torsiondrives for all rotatable bonds in a molecule.
@@ -676,6 +693,9 @@ def run_reference_torsiondrives(
         SDF file with the starting geometry (atom order must match the
         mapped SMILES used for the QC geometry, as in SDFs written by this
         tool). If None, a conformer is generated from the SMILES
+    extra_frozen_dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Dihedrals frozen at their starting values in every scan (e.g. ring
+        torsions, to keep a ring pucker fixed)
 
     Returns
     -------
@@ -749,6 +769,9 @@ def run_reference_torsiondrives(
         "dihedrals": all_dihedrals,
         "scanned_indices": indices_to_scan,
         "dihedral_range": list(dihedral_range) if dihedral_range else None,
+        "extra_frozen_dihedrals": (
+            [list(d) for d in extra_frozen_dihedrals] if extra_frozen_dihedrals else None
+        ),
     }
     with open(output_dir / "molecule_info.json", "w") as f:
         json.dump(mol_data, f, indent=2)
@@ -775,6 +798,7 @@ def run_reference_torsiondrives(
             program,
             grid_spacing=grid_spacing,
             dihedral_range=dihedral_range,
+            extra_frozen_dihedrals=extra_frozen_dihedrals,
         )
 
         result = run_single_torsiondrive(td_input, ncores=ncores, memory=memory)
@@ -1249,6 +1273,13 @@ def run_reference_scans(
         None,
         help="SDF with the starting geometry (atom order as in SDFs written by contorsion).",
     ),
+    freeze_dihedrals: Optional[str] = typer.Option(
+        None,
+        help=(
+            "Dihedrals to freeze at their starting values throughout every scan, as "
+            "semicolon-separated quadruples (e.g. '16,17,18,19;18,19,20,16' to fix a ring pucker)."
+        ),
+    ),
     ncores: int = typer.Option(
         30,
         help="Number of CPU cores",
@@ -1287,6 +1318,7 @@ def run_reference_scans(
         dihedrals=_parse_dihedrals(dihedrals),
         dihedral_range=parsed_range,
         initial_geometry=initial_geometry,
+        extra_frozen_dihedrals=_parse_dihedrals(freeze_dihedrals),
     )
 
 
