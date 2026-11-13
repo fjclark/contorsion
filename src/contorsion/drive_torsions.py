@@ -33,7 +33,7 @@ from contorsion.openmm_ml_harness import OpenMMMLHarness
 from openff.toolkit.topology import Molecule, Atom, Bond
 from openff.units import unit
 from rdkit import Chem
-from rdkit.Chem import Draw, rdDepictor
+from rdkit.Chem import Draw, rdDepictor, rdMolTransforms
 from rdkit.Geometry import Point2D
 from matplotlib.ticker import MultipleLocator
 
@@ -752,13 +752,9 @@ def run_reference_torsiondrives(
     # torsiondrive starts from the grid point nearest the starting dihedral
     # and silently returns nothing if that lies outside the scan range
     if dihedral_range is not None:
-        xyz = molecule.conformers[0].m_as(unit.angstrom)
+        conf = molecule.to_rdkit().GetConformer()
         for dihedral in dihedrals:
-            p0, p1, p2, p3 = xyz[list(dihedral)]
-            b1 = (p2 - p1) / np.linalg.norm(p2 - p1)
-            v = (p0 - p1) - np.dot(p0 - p1, b1) * b1
-            w = (p3 - p2) - np.dot(p3 - p2, b1) * b1
-            angle = np.degrees(np.arctan2(np.dot(np.cross(b1, v), w), np.dot(v, w)))
+            angle = rdMolTransforms.GetDihedralDeg(conf, *map(int, dihedral))
             if not dihedral_range[0] <= angle <= dihedral_range[1]:
                 raise ValueError(
                     f"Starting dihedral {dihedral} is {angle:.1f} deg, outside the "
