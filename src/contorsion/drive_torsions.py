@@ -709,8 +709,11 @@ def run_reference_torsiondrives(
     molecule = Molecule.from_smiles(smiles)
     if initial_geometry is not None:
         start = Molecule.from_file(str(initial_geometry))
-        # Compare canonical SMILES (incl. stereo); are_isomorphic can reject
-        # matching molecules built from CXSMILES with stereo groups
+        # Compare canonical SMILES (incl. stereo) rather than using are_isomorphic.
+        # Example: for "CC1=CC=C(NC(=O)C2=CC(Cl)=C3NC(N[C@H]4CCNC4)=NC3=C2)C=C1C |&1:16|"
+        # (CXSMILES; "&1:16" puts stereocentre 16 in an AND enhanced-stereo group),
+        # are_isomorphic rejected an SDF of that same molecule written by contorsion,
+        # although both give identical canonical stereo SMILES.
         if start.to_smiles(mapped=False) != molecule.to_smiles(mapped=False):
             raise ValueError(
                 f"Initial geometry {initial_geometry} does not match SMILES {smiles}"
