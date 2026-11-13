@@ -33,7 +33,7 @@ from contorsion.openmm_ml_harness import OpenMMMLHarness
 from openff.toolkit.topology import Molecule, Atom, Bond
 from openff.units import unit
 from rdkit import Chem
-from rdkit.Chem import Draw, rdDepictor
+from rdkit.Chem import Draw, rdDepictor, rdMolTransforms
 from rdkit.Geometry import Point2D
 from matplotlib.ticker import MultipleLocator
 
@@ -155,6 +155,8 @@ def build_torsiondrive_input(
     program: str,
     grid_spacing: int = 15,
     optimization_keywords: Optional[Dict[str, Any]] = None,
+    dihedral_range: Optional[Tuple[int, int]] = None,
+    extra_frozen_dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
 ) -> TorsionDriveInput:
     """
     Build a TorsionDriveInput for a specific dihedral.
@@ -173,6 +175,12 @@ def build_torsiondrive_input(
         Grid spacing in degrees for torsion scan
     optimization_keywords : Optional[Dict[str, Any]], default=None
         Keywords for geometric optimizer. If None, uses sensible defaults
+    dihedral_range : Optional[Tuple[int, int]], default=None
+        Limit the scan to this (min, max) range in degrees, e.g. (-60, 60)
+        for ring torsions. If None, scan the full 360 degrees
+    extra_frozen_dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Dihedrals frozen at their starting values throughout the scan (e.g.
+        ring torsions, to keep a ring pucker fixed)
 
     Returns
     -------
@@ -189,8 +197,22 @@ def build_torsiondrive_input(
             "epsilon": 0.0,
             "program": program,
         }
+    if extra_frozen_dihedrals:
+        # torsiondrive adds its own "set" constraint alongside these
+        optimization_keywords = {
+            **optimization_keywords,
+            "constraints": {
+                "freeze": [
+                    {"type": "dihedral", "indices": list(d)} for d in extra_frozen_dihedrals
+                ]
+            },
+        }
 
-    keywords = TDKeywords(dihedrals=[dihedral], grid_spacing=[grid_spacing])
+    keywords = TDKeywords(
+        dihedrals=[dihedral],
+        grid_spacing=[grid_spacing],
+        dihedral_ranges=[list(dihedral_range)] if dihedral_range else None,
+    )
     input_spec = QCInputSpecification(
         driver=DriverEnum.gradient,
         model=model,
@@ -252,6 +274,7 @@ def run_constrained_optimization(
     optimization_keywords: Dict[str, Any],
     ncores: int = 30,
     memory: float = 20.0,
+    extra_frozen_dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
 ) -> Tuple[QCMolecule, float, bool]:
     """
     Run a constrained geometry optimization with frozen dihedral.
@@ -270,6 +293,9 @@ def run_constrained_optimization(
         Number of cores
     memory : float, default=20.0
         Memory in GB
+    extra_frozen_dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Additional dihedrals to freeze at their starting values (e.g. ring
+        torsions, to keep a ring pucker fixed)
 
     Returns
     -------
@@ -283,7 +309,12 @@ def run_constrained_optimization(
 
     opt_keywords = optimization_keywords.copy()
     opt_keywords["constraints"] = {
-        "freeze": [{"type": "dihedral", "indices": list(dihedral)}]
+        "freeze": [
+            {"type": "dihedral", "indices": list(d)}
+            for d in [dihedral, *(extra_frozen_dihedrals or [])]
+            # skip extra entries that are the scanned dihedral itself (either direction)
+            if d is dihedral or (tuple(d) != tuple(dihedral) and tuple(d) != tuple(dihedral)[::-1])
+        ]
     }
 
     opt_task = OptimizationInput(
@@ -313,7 +344,7 @@ def run_constrained_optimization(
 def calculate_energy_rmsd(
     reference: TorsionDriveResult,
     target: TorsionDriveResult,
-    angle_range: range = range(-165, 180, 15),
+    angle_range: Optional[List[int]] = None,
 ) -> Dict[str, NDArray[np.floating]]:
     """
     Calculate relative energies and RMSDs between reference and target scans.
@@ -324,8 +355,9 @@ def calculate_energy_rmsd(
         Reference (e.g., QM) scan
     target : TorsionDriveResult
         Target (e.g., force field) scan
-    angle_range : range, default=range(-165, 180, 15)
-        Angles to analyze
+    angle_range : Optional[List[int]], default=None
+        Angles to analyze. If None, use every grid angle present in both
+        scans, so any grid spacing or dihedral range works
 
     Returns
     -------
@@ -340,6 +372,11 @@ def calculate_energy_rmsd(
     ref_energies_list = []
     target_energies_list = []
     rmsds = []
+
+    if angle_range is None:
+        angle_range = sorted(
+            int(a) for a in reference.final_energies if a in target.final_energies
+        )
 
     for angle in angle_range:
         angle_key = str(angle)
@@ -619,6 +656,10 @@ def run_reference_torsiondrives(
     ncores: int = 30,
     memory: float = 20.0,
     bond_indices: Optional[List[int]] = None,
+    dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
+    dihedral_range: Optional[Tuple[int, int]] = None,
+    initial_geometry: Optional[Path] = None,
+    extra_frozen_dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
 ) -> Dict[int, TorsionDriveResult]:
     """
     Run reference torsiondrives for all rotatable bonds in a molecule.
@@ -644,6 +685,19 @@ def run_reference_torsiondrives(
     bond_indices : Optional[List[int]], default=None
         Specific bond indices to scan. If None, scan all rotatable bonds.
         Indices correspond to the order of rotatable bonds found.
+    dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Scan these dihedrals instead of the automatically detected rotatable
+        bonds (e.g. ring torsions). They are saved to molecule_info.json, so
+        benchmarking and plotting work as for rotatable bonds
+    dihedral_range : Optional[Tuple[int, int]], default=None
+        Limit every scan to this (min, max) range in degrees
+    initial_geometry : Optional[Path], default=None
+        SDF file with the starting geometry (atom order must match the
+        mapped SMILES used for the QC geometry, as in SDFs written by this
+        tool). If None, a conformer is generated from the SMILES
+    extra_frozen_dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Dihedrals frozen at their starting values in every scan (e.g. ring
+        torsions, to keep a ring pucker fixed)
 
     Returns
     -------
@@ -655,11 +709,30 @@ def run_reference_torsiondrives(
     # Build molecule
     console.print(f"[bold blue]Building molecule from SMILES:[/bold blue] {smiles}")
     molecule = Molecule.from_smiles(smiles)
-    molecule.generate_conformers(n_conformers=n_conformers)
+    if initial_geometry is not None:
+        start = Molecule.from_file(str(initial_geometry))
+        # Compare canonical SMILES (incl. stereo) rather than using are_isomorphic.
+        # Example: for "CC1=CC=C(NC(=O)C2=CC(Cl)=C3NC(N[C@H]4CCNC4)=NC3=C2)C=C1C |&1:16|"
+        # (CXSMILES; "&1:16" puts stereocentre 16 in an AND enhanced-stereo group),
+        # are_isomorphic rejected an SDF of that same molecule written by contorsion,
+        # although both give identical canonical stereo SMILES.
+        if start.to_smiles(mapped=False) != molecule.to_smiles(mapped=False):
+            raise ValueError(
+                f"Initial geometry {initial_geometry} does not match SMILES {smiles}"
+            )
+        # Keep the SDF's atom order so dihedral indices refer to its atoms
+        molecule = start
+        console.print(f"[cyan]Starting from geometry in {initial_geometry}[/cyan]")
+    else:
+        molecule.generate_conformers(n_conformers=n_conformers)
 
-    # Find rotatable bonds
-    all_dihedrals = find_rotatable_bonds_with_dihedrals(molecule)
-    console.print(f"[green]Found {len(all_dihedrals)} rotatable bonds[/green]")
+    # Find rotatable bonds, unless specific dihedrals were requested
+    if dihedrals is not None:
+        all_dihedrals = [tuple(d) for d in dihedrals]
+        console.print(f"[green]Using {len(all_dihedrals)} requested dihedrals[/green]")
+    else:
+        all_dihedrals = find_rotatable_bonds_with_dihedrals(molecule)
+        console.print(f"[green]Found {len(all_dihedrals)} rotatable bonds[/green]")
 
     if not all_dihedrals:
         console.print("[yellow]Warning: No rotatable bonds found[/yellow]")
@@ -678,12 +751,28 @@ def run_reference_torsiondrives(
         dihedrals = all_dihedrals
         indices_to_scan = list(range(len(dihedrals)))
 
+    # torsiondrive starts from the grid point nearest the starting dihedral
+    # and silently returns nothing if that lies outside the scan range
+    if dihedral_range is not None:
+        conf = molecule.to_rdkit().GetConformer()
+        for dihedral in dihedrals:
+            angle = rdMolTransforms.GetDihedralDeg(conf, *map(int, dihedral))
+            if not dihedral_range[0] <= angle <= dihedral_range[1]:
+                raise ValueError(
+                    f"Starting dihedral {dihedral} is {angle:.1f} deg, outside the "
+                    f"scan range {dihedral_range}; torsiondrive would return no data"
+                )
+
     # Save molecule info
     mol_data = {
         "smiles": smiles,
         "n_rotatable_bonds": len(all_dihedrals),
         "dihedrals": all_dihedrals,
         "scanned_indices": indices_to_scan,
+        "dihedral_range": list(dihedral_range) if dihedral_range else None,
+        "extra_frozen_dihedrals": (
+            [list(d) for d in extra_frozen_dihedrals] if extra_frozen_dihedrals else None
+        ),
     }
     with open(output_dir / "molecule_info.json", "w") as f:
         json.dump(mol_data, f, indent=2)
@@ -709,6 +798,8 @@ def run_reference_torsiondrives(
             model,
             program,
             grid_spacing=grid_spacing,
+            dihedral_range=dihedral_range,
+            extra_frozen_dihedrals=extra_frozen_dihedrals,
         )
 
         result = run_single_torsiondrive(td_input, ncores=ncores, memory=memory)
@@ -748,6 +839,7 @@ def run_benchmark_torsiondrives(
     ncores: int = 30,
     memory: float = 20.0,
     bond_indices: Optional[List[int]] = None,
+    extra_frozen_dihedrals: Optional[List[Tuple[int, int, int, int]]] = None,
 ) -> Dict[int, TorsionDriveResult]:
     """
     Run benchmark torsiondrives using reference geometries.
@@ -769,6 +861,9 @@ def run_benchmark_torsiondrives(
     bond_indices : Optional[List[int]], default=None
         Specific bond indices to benchmark. If None, automatically detect
         which bonds are present in the reference directory.
+    extra_frozen_dihedrals : Optional[List[Tuple[int, int, int, int]]], default=None
+        Additional dihedrals frozen at their reference values in every
+        optimization (e.g. ring torsions, to keep the reference ring pucker)
 
     Returns
     -------
@@ -815,7 +910,14 @@ def run_benchmark_torsiondrives(
         # Build benchmark result
         benchmark_result = TorsionDriveResult(
             keywords=reference.keywords,
-            extras=reference.extras,
+            extras={
+                **reference.extras,
+                **(
+                    {"extra_frozen_dihedrals": [list(d) for d in extra_frozen_dihedrals]}
+                    if extra_frozen_dihedrals
+                    else {}
+                ),
+            },
             input_specification=QCInputSpecification(
                 driver="gradient",
                 model=model,
@@ -852,6 +954,7 @@ def run_benchmark_torsiondrives(
                     opt_keywords,
                     ncores=ncores,
                     memory=memory,
+                    extra_frozen_dihedrals=extra_frozen_dihedrals,
                 )
                 benchmark_result.final_molecules[angle_key] = final_mol
                 benchmark_result.final_energies[angle_key] = energy
@@ -1110,6 +1213,17 @@ def create_analysis_plots(
 # ============================================================================
 
 
+def _parse_dihedrals(text: Optional[str]) -> Optional[List[Tuple[int, int, int, int]]]:
+    """Parse 'a,b,c,d;e,f,g,h' into a list of 4-tuples (None if not given)."""
+    if not text:
+        return None
+    parsed = [tuple(int(x) for x in quad.split(",")) for quad in text.split(";")]
+    if any(len(q) != 4 for q in parsed):
+        console.print("[red]Error: each dihedral needs exactly 4 atom indices[/red]")
+        raise typer.Exit(1)
+    return parsed
+
+
 @app.command()
 def run_reference_scans(
     smiles: str = typer.Argument(..., help="SMILES string of molecule"),
@@ -1140,6 +1254,28 @@ def run_reference_scans(
         None,
         help="Comma-separated bond indices to scan (e.g., '0,2,5'). If not provided, scan all rotatable bonds.",
     ),
+    dihedrals: Optional[str] = typer.Option(
+        None,
+        help=(
+            "Scan these dihedrals instead of the rotatable bonds, as semicolon-separated "
+            "comma-separated quadruples (e.g. '16,17,18,19;17,18,19,20' for ring torsions)."
+        ),
+    ),
+    dihedral_range: Optional[str] = typer.Option(
+        None,
+        help="Limit scans to 'min,max' degrees, e.g. --dihedral-range=-60,60. Default: full 360.",
+    ),
+    initial_geometry: Optional[Path] = typer.Option(
+        None,
+        help="SDF with the starting geometry (atom order as in SDFs written by contorsion).",
+    ),
+    freeze_dihedrals: Optional[str] = typer.Option(
+        None,
+        help=(
+            "Dihedrals to freeze at their starting values throughout every scan, as "
+            "semicolon-separated quadruples (e.g. '16,17,18,19;18,19,20,16' to fix a ring pucker)."
+        ),
+    ),
     ncores: int = typer.Option(
         30,
         help="Number of CPU cores",
@@ -1159,6 +1295,13 @@ def run_reference_scans(
     if bond_indices:
         parsed_indices = [int(x.strip()) for x in bond_indices.split(",")]
 
+    parsed_range = None
+    if dihedral_range:
+        parsed_range = tuple(int(x) for x in dihedral_range.split(","))
+        if len(parsed_range) != 2:
+            console.print("[red]Error: --dihedral-range needs exactly 'min,max'[/red]")
+            raise typer.Exit(1)
+
     run_reference_torsiondrives(
         smiles=smiles,
         model=model,
@@ -1168,6 +1311,10 @@ def run_reference_scans(
         ncores=ncores,
         memory=memory,
         bond_indices=parsed_indices,
+        dihedrals=_parse_dihedrals(dihedrals),
+        dihedral_range=parsed_range,
+        initial_geometry=initial_geometry,
+        extra_frozen_dihedrals=_parse_dihedrals(freeze_dihedrals),
     )
 
 
@@ -1200,6 +1347,13 @@ def run_benchmark_scans(
         None,
         help="Comma-separated bond indices to benchmark (e.g., '0,2,5'). If not provided, auto-detect from reference directory.",
     ),
+    freeze_dihedrals: Optional[str] = typer.Option(
+        None,
+        help=(
+            "Extra dihedrals to freeze at their reference values, as semicolon-separated "
+            "comma-separated quadruples (e.g. '16,17,18,19;18,19,20,16' to keep a ring pucker)."
+        ),
+    ),
     ncores: int = typer.Option(
         30,
         help="Number of CPU cores",
@@ -1220,6 +1374,8 @@ def run_benchmark_scans(
     if bond_indices:
         parsed_indices = [int(x.strip()) for x in bond_indices.split(",")]
 
+    parsed_frozen = _parse_dihedrals(freeze_dihedrals)
+
     run_benchmark_torsiondrives(
         reference_dir=reference_dir,
         model=model,
@@ -1228,6 +1384,7 @@ def run_benchmark_scans(
         ncores=ncores,
         memory=memory,
         bond_indices=parsed_indices,
+        extra_frozen_dihedrals=parsed_frozen,
     )
 
 
