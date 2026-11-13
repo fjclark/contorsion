@@ -344,7 +344,7 @@ def run_constrained_optimization(
 def calculate_energy_rmsd(
     reference: TorsionDriveResult,
     target: TorsionDriveResult,
-    angle_range: Optional[List[int]] = range(-165, 180, 15),
+    angle_range: Optional[List[int]] = range(-165, 181, 15),
 ) -> Dict[str, NDArray[np.floating]]:
     """
     Calculate relative energies and RMSDs between reference and target scans.
@@ -355,7 +355,7 @@ def calculate_energy_rmsd(
         Reference (e.g., QM) scan
     target : TorsionDriveResult
         Target (e.g., force field) scan
-    angle_range : Optional[List[int]], default=range(-165, 180, 15)
+    angle_range : Optional[List[int]], default=range(-165, 181, 15)
         Angles to analyze. If None, use every grid angle present in the
         reference scan (needed for scans with a limited dihedral range)
 
@@ -1069,7 +1069,7 @@ def create_analysis_plots(
             data = calculate_energy_rmsd(
                 reference,
                 benchmark,
-                angle_range=None if mol_info.get("dihedral_range") else range(-165, 180, 15),
+                angle_range=None if mol_info.get("dihedral_range") else range(-165, 181, 15),
             )
             benchmarks.append((label,data))
 
