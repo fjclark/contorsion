@@ -1,0 +1,28 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  integration-tests:
+    name: CI test on ethanol
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Pixi
+        uses: prefix-dev/setup-pixi@v0.11.3
+        with:
+          pixi-version: latest
+          manifest-path: pyproject.toml
+          cache: true
+          locked: true
+
+      - name: Check Contorsion installation
+        run: pixi run contorsion --help
+
+      - name: Run integration tests
+        run: pixi run pytest tests/integration/ -v
