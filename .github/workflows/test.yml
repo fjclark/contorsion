@@ -16,7 +16,7 @@ jobs:
       - name: Install Pixi
         uses: prefix-dev/setup-pixi@v0.11.3
         with:
-          pixi-version: v0.67.2
+          pixi-version: latest
           manifest-path: pyproject.toml
           environments: "base-cpu"
           cache: true
