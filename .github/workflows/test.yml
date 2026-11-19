@@ -18,12 +18,11 @@ jobs:
         with:
           pixi-version: latest
           manifest-path: pyproject.toml
-          environments: "base-cpu"
           cache: true
           locked: true
 
       - name: Check Contorsion installation
-        run: pixi run -e "base-cpu" contorsion --help
+        run: pixi run contorsion --help
 
       - name: Run integration tests
-        run: pixi run -e "base-cpu" pytest tests/integration/ -v
+        run: pixi run pytest tests/integration/ -v
